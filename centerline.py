@@ -5,8 +5,9 @@ import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
 import time
+from collections import defaultdict
 from skimage import morphology
-from scipy import ndimage
+from scipy import ndimage, interpolate, spatial
 
 def ComputeCovariance(demo, idx):
     points = np.asarray(demo.points)
@@ -19,21 +20,6 @@ def ComputeCovariance(demo, idx):
     cumulants[4] = np.mean(neighbors[:, 0] * neighbors[:, 1])
     cumulants[5] = np.mean(neighbors[:, 0] * neighbors[:, 2])
     cumulants[7] = np.mean(neighbors[:, 1] * neighbors[:, 2])
-
-    '''
-    for i in range(len(idx)):
-        point = demo.points[idx[i]]
-        cumulants[0] += point[0]
-        cumulants[1] += point[1]
-        cumulants[2] += point[2]
-        cumulants[3] += point[0] * point[0]
-        cumulants[4] += point[0] * point[1]
-        cumulants[5] += point[0] * point[2]
-        cumulants[6] += point[1] * point[1]
-        cumulants[7] += point[1] * point[2]
-        cumulants[8] += point[2] * point[2]
-    cumulants /= len(idx)
-    '''
 
     covariance[0, 0] = cumulants[3] - cumulants[0] * cumulants[0]
     covariance[1, 1] = cumulants[6] - cumulants[1] * cumulants[1]
@@ -95,7 +81,7 @@ def GetDir(demo, r, principle=False):
     if not principle:
         demo.orient_normals_to_align_with_direction([1, 0, 0])
     # demo.orient_normals_to_align_with_direction([0, 0, 1])
-    # open3d.visualization.draw_geometries([demo], point_show_normal=True)
+    open3d.visualization.draw_geometries([demo], point_show_normal=True)
     # print(np.asarray(demo.normals))
 
     return eigenvalues
@@ -112,7 +98,7 @@ def FindDir(demo):
     index = np.where(goods>0)
     ave = np.average(initials[goods, :], axis=0)
     ave = ave / np.linalg.norm(ave)
-    print(ave)
+    # print(ave)
     ratio = 2
     for i in range(5):
         z = np.abs(stats.zscore(initials[goods, :], axis=0))
@@ -123,7 +109,8 @@ def FindDir(demo):
         ave = np.average(initials[goods, :], axis=0)
         ave = ave / np.linalg.norm(ave)
         # open3d.visualization.draw_geometries([norms])
-        print(ave)
+        # print(ave)
+    open3d.visualization.draw_geometries([norms])
     return ave
 
 def np_img(x, y, cs_scale, scale=255):
@@ -134,31 +121,67 @@ def np_img(x, y, cs_scale, scale=255):
     xsize = int((xmax - xmin) // cs_scale + 1)
     x = (x - xmin) // cs_scale
     img = np.zeros((xsize, ysize), dtype=np.uint8)
-    point_mapping = {}
+    point_mapping = defaultdict(list)
     for i in range(x.shape[0]):
         img[int(x[i]), int(y[i])] = scale
-        point_mapping[(int(x[i]), int(y[i]))] = i
-    return img, point_mapping
+        point_mapping[(int(x[i]), int(y[i]))].append(i)
+    return img, np.concatenate((x.reshape(-1, 1), y.reshape(-1, 1)), axis=1), point_mapping
+
+def hole_sample_points(labeled, num=10):
+    xys = np.nonzero(labeled)
+    total = len(xys[0])
+    indexs = np.random.choice(np.arange(total), num)
+    xs = xys[0][indexs]
+    ys = xys[1][indexs]
+    return np.concatenate((xs.reshape(-1, 1), ys.reshape(-1, 1)), axis=1)
+
+def get_hole_r(xys, rs, hole_coors, inter_n=50):
+    assert xys.shape[0] == rs.shape[0]
+    tree = spatial.KDTree(list(zip(xys[:, 0], xys[:, 1])))
+    neighbors = tree.query(hole_coors, k=inter_n)
+    hole_r = np.zeros(hole_coors.shape[0])
+    for i in range(hole_coors.shape[0]):
+        nears = neighbors[1][i, :]
+        # r_f = interpolate.interp2d(xys[:, 0][nears], xys[:, 1][nears], rs[nears], kind='linear')  # interpolate to get r
+        # hole_r[i] = r_f(hole_coors[i, 0], hole_coors[i, 1])
+        hole_r[i] = np.mean(rs[nears])
+    return hole_r
+
+def xy_2_xyz(xys, rs, mean_r, center_d, theta_d, xmin_point, cs_scale):
+    l_p = xmin_point + xys[:, 0].reshape(-1, 1) * cs_scale * center_d
+    thetas = (xys[:, 1] * cs_scale) / mean_r
+    y_d = rs.reshape(-1, 1) * np.cos(thetas).reshape(-1, 1) * theta_d
+    x_d = rs.reshape(-1, 1) * np.sin(thetas).reshape(-1, 1) * np.cross(center_d, theta_d)
+    ps = l_p + x_d + y_d
+    return ps
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--chuck_dir", type=str, default='../mesh/')
     parser.add_argument("--save_dir", type=str, default='dump/')
-    parser.add_argument("--r_version", choices=['cs', 'global'])
+    parser.add_argument("--center", choices=['extremal', 'centroid'])
     parser.add_argument("--closing", action="store_true")
     parser.add_argument("--opening", action="store_true")
     parser.add_argument("--disc_size", type=int, default=6)
     args = parser.parse_args()
     print(args)
-    chucks = ['mesh_i1_n0.4.obj', 'refine_mesh_gt004.obj', 'refine_mesh_gt019.obj', 'refine_mesh_gt027.obj',
-              'refine_mesh_gt031.obj', 'refine_mesh_gt047.obj', 'refine_mesh_gt051.obj']
+    chunks = ['020', '027', '031', '032', '035', '039', '055', '056', '057', '063', '064', '067']
+    # chunks = ['063', '064', '067']
+    # chunks = ['031']
+    # chunks = ['032', '039', '057', '063']
+    # redo 032 057 063, 039
 
-    for c in chucks[:]:
+    for c in chunks[:]:
         print(c)
         save_root = args.save_dir + os.path.splitext(c)[0]
 
         # read chuck
-        mesh = open3d.io.read_triangle_mesh("../mesh/" + c)
+        files = os.listdir("../mesh/results/" + c + '/')
+        for file in files:
+            if file.split('.')[-1] == 'obj':
+                mesh = open3d.io.read_triangle_mesh("../mesh/results/" + c + '/' + file)
+            else:
+                continue
         pc = open3d.geometry.PointCloud()
         pc.points = mesh.vertices
         pc.colors = mesh.vertex_colors
@@ -179,18 +202,20 @@ if __name__ == "__main__":
         ave = FindDir(downpcd)
 
         # print centerline
-        # center = np.average(np.asarray(downpcd.points), axis=0)
         points = np.asarray(downpcd.points)
-        xmax, ymax, zmax = np.max(points, axis=0)
-        xmin, ymin, zmin = np.min(points, axis=0)
-        center = np.array([(xmax + xmin) / 2, (ymax + ymin) / 2, (zmax + zmin) / 2])
+        if args.center == 'extremal':
+            xmax, ymax, zmax = np.max(points, axis=0)
+            xmin, ymin, zmin = np.min(points, axis=0)
+            center = np.array([(xmax + xmin) / 2, (ymax + ymin) / 2, (zmax + zmin) / 2])
+        else:
+            center = np.mean(points, axis=0)
         linepoints = [center - ave * 3, center + ave * 3]
         lines = [[0, 1]]
         line_set = open3d.geometry.LineSet(
             points=open3d.utility.Vector3dVector(linepoints),
             lines=open3d.utility.Vector2iVector(lines),
         )
-        # open3d.visualization.draw_geometries([pc, line_set])
+        open3d.visualization.draw_geometries([pc, line_set])
         print(time.time()-start)
 
         # unfold
@@ -202,30 +227,31 @@ if __name__ == "__main__":
         vpc = allpoints - center
         projected_l = np.dot(vpc, direction).reshape(-1, 1)
         projected_p = center + projected_l * direction
-        vpr = allpoints - projected_p
-        r = np.linalg.norm(vpr, axis=1).reshape(-1, 1)
-        vpr = vpr / r
+        vpr_vec = allpoints - projected_p
+        r = np.linalg.norm(vpr_vec, axis=1).reshape(-1, 1)
+        vpr = vpr_vec / r
         cos_theta = np.dot(vpr, ori_dire)
         cos_theta = np.minimum(1, np.maximum(cos_theta, -1))
         theta = np.arccos(cos_theta)
         theta[vpr[:, 0] < 0] *= -1
         theta[vpr[:, 0] < 0] += 2 * np.pi
-        oversample = theta < np.pi/4
-        overtheta = theta[oversample] + 2 * np.pi
-        theta = np.concatenate((theta, overtheta), axis=0)
-        projected_l = np.concatenate((projected_l, projected_l[oversample]), axis=0)
-        colors = np.asarray(pc.colors)
-        colors = np.concatenate((colors, colors[oversample]), axis=0)
+        # over sample
+        # oversample = theta < np.pi/4
+        # overtheta = theta[oversample] + 2 * np.pi
+        # theta = np.concatenate((theta, overtheta), axis=0)
+        # projected_l = np.concatenate((projected_l, projected_l[oversample]), axis=0)
+        # colors = np.asarray(pc.colors)
+        # colors = np.concatenate((colors, colors[oversample]), axis=0)
         theta *= np.mean(r)
 
-        plt.scatter(projected_l, theta, s=2, c=colors, marker=',')
-        plt.xlabel('d')
-        plt.ylabel('rθ')
-        plt.show()
+        # plt.scatter(projected_l, theta, s=2, c=colors, marker=',')
+        # plt.xlabel('d')
+        # plt.ylabel('rθ')
+        # plt.show()
         print(np.mean(r))
 
         # morphology
-        img, mapping = np_img(projected_l, theta, 0.01, scale=1)
+        img, positions, mapping = np_img(projected_l, theta, 0.01, scale=1)
         plt.imsave(save_root + '_2d.png', img * 255, cmap='gray')
         save_mor = save_root
         if args.closing:
@@ -235,14 +261,45 @@ if __name__ == "__main__":
             img = morphology.binary_opening(img, morphology.diamond(args.disc_size)).astype(np.uint8)
             save_mor += '_open'
 
-        img = img.astype(float)
-        labeled, nr_objects = ndimage.label(img < 1.0)
-        save_img = np.repeat(np.expand_dims(img, 2), 3, axis=2)
+        # pick center 85% area, avoid end
+        shapes = img.shape
+        end_length = int(shapes[0] * 0.075)
+        new_img = img[end_length:-end_length, :]
+        new_shapes = new_img.shape
+        surface = np.count_nonzero(new_img)
+
+        new_img = new_img.astype(float)
+        labeled, nr_objects = ndimage.label(new_img < 1.0)
+        save_img = np.repeat(np.expand_dims(new_img, 2), 3, axis=2)
+
         areas = ''
+        areas_stat = 0
         for i in range(nr_objects):
             area = np.count_nonzero(labeled == i + 1)
+            areas_stat += area
             areas += '%d ' % area
             save_img[:, :, 0][labeled == i + 1] = i / nr_objects
         plt.imsave(save_mor + '.png', save_img)
-        print("%s: Number of holes is %d, area %s" % (c, nr_objects, areas))
+        print("%s:\nSurface area %d\nNumber of holes is %d, area %s" % (c, surface, nr_objects, areas))
+        hole_rate = areas_stat / (areas_stat + surface)
+        assert areas_stat + surface == new_shapes[0] * new_shapes[1]
+        print('Hole ratio %.4f' % hole_rate)
         print(time.time() - start)
+
+        # create hole points
+        hole_samples = hole_sample_points(labeled, num=areas_stat//10)
+        hole_samples[:, 0] += end_length
+        overlayed_pixel = []
+        for location, p_ls in mapping.items():
+            overlayed_pixel.append(p_ls[0])
+        hole_r = get_hole_r(positions[overlayed_pixel], r[overlayed_pixel], hole_samples)
+        left_p = min(projected_l) * direction + center
+        hole_sample_xyz = xy_2_xyz(hole_samples, hole_r, np.mean(r), direction, ori_dire, left_p, 0.01)
+
+        hole_point = open3d.geometry.PointCloud()
+        hole_point.points = open3d.utility.Vector3dVector(hole_sample_xyz)
+        hole_point.paint_uniform_color([0, 0, 1])
+        pc.paint_uniform_color([0.5, 0.5, 0.5])
+        open3d.visualization.draw_geometries([pc, hole_point])
+
+        np.save(save_root+'.npy', hole_sample_xyz)
