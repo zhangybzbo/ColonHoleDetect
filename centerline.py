@@ -1,5 +1,6 @@
 import open3d
 import os
+import pickle
 import argparse
 import numpy as np
 from scipy import stats
@@ -158,18 +159,20 @@ def xy_2_xyz(xys, rs, mean_r, center_d, theta_d, xmin_point, cs_scale):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--chuck_dir", type=str, default='../mesh/')
-    parser.add_argument("--save_dir", type=str, default='dump/')
+    parser.add_argument("--save_dir", type=str, default='dump/20/')
     parser.add_argument("--center", choices=['extremal', 'centroid'])
+    parser.add_argument("--oversample", action="store_true")
     parser.add_argument("--closing", action="store_true")
     parser.add_argument("--opening", action="store_true")
     parser.add_argument("--disc_size", type=int, default=6)
     args = parser.parse_args()
     print(args)
-    chunks = ['020', '027', '031', '032', '035', '039', '055', '056', '057', '063', '064', '067']
+    # chunks = ['020', '027', '031', '032', '035', '039', '055', '056', '057', '063', '064', '067']
+    chunks = ['020', '027', '031', '035', '055', '064', '067']
     # chunks = ['063', '064', '067']
-    # chunks = ['031']
-    # chunks = ['032', '039', '057', '063']
-    # redo 032 057 063, 039
+    #  chunks = ['063']
+    # chunks = ['032', '039', '056', '057', '063']
+    # redo 032 056 057 063, 039
 
     for c in chunks[:]:
         print(c)
@@ -235,20 +238,36 @@ if __name__ == "__main__":
         theta = np.arccos(cos_theta)
         theta[vpr[:, 0] < 0] *= -1
         theta[vpr[:, 0] < 0] += 2 * np.pi
+        mean_r = np.mean(r)
+        colors = np.asarray(pc.colors)
         # over sample
-        # oversample = theta < np.pi/4
-        # overtheta = theta[oversample] + 2 * np.pi
-        # theta = np.concatenate((theta, overtheta), axis=0)
-        # projected_l = np.concatenate((projected_l, projected_l[oversample]), axis=0)
-        # colors = np.asarray(pc.colors)
-        # colors = np.concatenate((colors, colors[oversample]), axis=0)
-        theta *= np.mean(r)
+        if args.oversample:
+            oversample = theta < np.pi/4
+            overtheta = theta[oversample] + 2 * np.pi
+            theta = np.concatenate((theta, overtheta), axis=0)
+            projected_l = np.concatenate((projected_l, projected_l[oversample]), axis=0)
+            r = np.concatenate((r, r[oversample]), axis=0)
+            colors = np.concatenate((colors, colors[oversample]), axis=0)
+        theta *= mean_r
 
-        # plt.scatter(projected_l, theta, s=2, c=colors, marker=',')
-        # plt.xlabel('d')
-        # plt.ylabel('rθ')
-        # plt.show()
-        print(np.mean(r))
+        '''img, positions, mapping = np_img(projected_l, theta, 0.01, scale=1)
+        shapes = img.shape
+        end_length = int(shapes[0] * 0.075)
+        getridof = np.where(positions[:, 0] > (shapes[0] - end_length*2.1))[0]
+        projected_l = np.delete(projected_l, getridof)
+        theta = np.delete(theta, getridof)
+        colors = np.delete(colors, getridof, axis=0)
+
+        import matplotlib
+        matplotlib.rcParams['xtick.labelsize'] = 20
+        matplotlib.rcParams['ytick.labelsize'] = 20
+        plt.scatter(projected_l, theta, s=2, c=colors, marker=',')
+        plt.xlabel('d', fontsize=20)
+        plt.ylabel('rθ', fontsize=20)
+        plt.title('Flattened surface', fontsize=25)
+        plt.savefig('test.png', transparent=True)
+        plt.show()'''
+        print(mean_r)
 
         # morphology
         img, positions, mapping = np_img(projected_l, theta, 0.01, scale=1)
@@ -263,7 +282,9 @@ if __name__ == "__main__":
 
         # pick center 85% area, avoid end
         shapes = img.shape
-        end_length = int(shapes[0] * 0.075)
+        end_length = int(shapes[0] * 0.1)
+        # new_img = np.zeros((shapes[0]*3, shapes[1]))
+        # new_img[shapes[0]:shapes[0]*2, :] = img
         new_img = img[end_length:-end_length, :]
         new_shapes = new_img.shape
         surface = np.count_nonzero(new_img)
@@ -272,34 +293,60 @@ if __name__ == "__main__":
         labeled, nr_objects = ndimage.label(new_img < 1.0)
         save_img = np.repeat(np.expand_dims(new_img, 2), 3, axis=2)
 
+        hole_point_num = [] # how many hole point in each hole
+        hole_samples = []
+
         areas = ''
         areas_stat = 0
         for i in range(nr_objects):
             area = np.count_nonzero(labeled == i + 1)
+            if area >= shapes[0] * shapes[1]:
+                continue
             areas_stat += area
             areas += '%d ' % area
             save_img[:, :, 0][labeled == i + 1] = i / nr_objects
+
+            hole_sample = hole_sample_points(labeled == i + 1, num=area // 3)
+            hole_samples.append(hole_sample)
+            hole_point_num.append(hole_sample.shape[0])
         plt.imsave(save_mor + '.png', save_img)
         print("%s:\nSurface area %d\nNumber of holes is %d, area %s" % (c, surface, nr_objects, areas))
         hole_rate = areas_stat / (areas_stat + surface)
-        assert areas_stat + surface == new_shapes[0] * new_shapes[1]
+        # assert areas_stat + surface == new_shapes[0] * new_shapes[1]
         print('Hole ratio %.4f' % hole_rate)
         print(time.time() - start)
 
         # create hole points
-        hole_samples = hole_sample_points(labeled, num=areas_stat//10)
+        # hole_samples = hole_sample_points(labeled, num=areas_stat//10)
+        hole_samples = np.concatenate(hole_samples, axis=0)
         hole_samples[:, 0] += end_length
+        # hole_samples[:, 0] -= shapes[0]
         overlayed_pixel = []
         for location, p_ls in mapping.items():
             overlayed_pixel.append(p_ls[0])
-        hole_r = get_hole_r(positions[overlayed_pixel], r[overlayed_pixel], hole_samples)
+        consistant_sf = np.concatenate((positions[overlayed_pixel], positions[overlayed_pixel], positions[overlayed_pixel]), axis=0)
+        consistant_rs = np.concatenate((r[overlayed_pixel], r[overlayed_pixel], r[overlayed_pixel]), axis=0)
+        consistant_sf[:len(overlayed_pixel), 1] -= shapes[1]
+        consistant_sf[-len(overlayed_pixel):, 1] += shapes[1]
+        hole_r = get_hole_r(consistant_sf, consistant_rs, hole_samples)
         left_p = min(projected_l) * direction + center
-        hole_sample_xyz = xy_2_xyz(hole_samples, hole_r, np.mean(r), direction, ori_dire, left_p, 0.01)
+        hole_sample_xyz = xy_2_xyz(hole_samples, hole_r, mean_r, direction, ori_dire, left_p, 0.01)
 
         hole_point = open3d.geometry.PointCloud()
         hole_point.points = open3d.utility.Vector3dVector(hole_sample_xyz)
-        hole_point.paint_uniform_color([0, 0, 1])
+        all_colors = []
+        # hole_point.paint_uniform_color([0, 0, 1])
         pc.paint_uniform_color([0.5, 0.5, 0.5])
-        open3d.visualization.draw_geometries([pc, hole_point])
 
-        np.save(save_root+'.npy', hole_sample_xyz)
+        hole_sample_ls = {}
+        hole_sample_ls['all'] = hole_sample_xyz
+        accum = 0
+        for i, hole in enumerate(hole_point_num):
+            hole_sample_ls[i] = hole_sample_xyz[accum:accum+hole, :]
+            all_colors.append(np.repeat(np.random.uniform(0, 1, (1, 3)), hole, axis=0))
+            accum += hole
+        hole_point.colors = open3d.utility.Vector3dVector(np.concatenate(all_colors, axis=0))
+        open3d.visualization.draw_geometries([pc, hole_point])
+        with open(save_root+'.pkl', 'wb') as f:
+            pickle.dump(hole_sample_ls, f)
+        # np.save(save_root+'.npy', hole_sample_xyz)
