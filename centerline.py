@@ -81,7 +81,7 @@ def GetDir(demo, r, principle=False):
     if not principle:
         demo.orient_normals_to_align_with_direction([1, 0, 0])
     # demo.orient_normals_to_align_with_direction([0, 0, 1])
-    open3d.visualization.draw_geometries([demo], point_show_normal=True)
+    open3d.visualization.draw_geometries([demo])
     # print(np.asarray(demo.normals))
 
     return eigenvalues
@@ -157,29 +157,37 @@ def xy_2_xyz(xys, rs, mean_r, center_d, theta_d, xmin_point, cs_scale):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--chuck_dir", type=str, default='../mesh/')
+    parser.add_argument("--chuck_dir", type=str, default='/home/shuxian/projects/mesh/')
     parser.add_argument("--save_dir", type=str, default='dump/')
     parser.add_argument("--center", choices=['extremal', 'centroid'])
     parser.add_argument("--closing", action="store_true")
     parser.add_argument("--opening", action="store_true")
     parser.add_argument("--disc_size", type=int, default=6)
+    parser.add_argument("--chunk", type=str, default='')
     args = parser.parse_args()
     print(args)
-    chunks = ['020', '027', '031', '032', '035', '039', '055', '056', '057', '063', '064', '067']
-    # chunks = ['063', '064', '067']
-    # chunks = ['031']
-    # chunks = ['032', '039', '057', '063']
+    if args.chunk == '':
+        # chunks = ['020', '027', '031', '032', '035', '039', '055', '056', '057', '063', '064', '067']
+        # chunks = ['063', '064', '067']
+        chunks = ['Auto_A_Sep20_15-29-42_003']
+        # chunks = ['032', '039', '057', '063']
+    else:
+        chunks = [args.chunk]
     # redo 032 057 063, 039
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
 
     for c in chunks[:]:
         print(c)
         save_root = args.save_dir + os.path.splitext(c)[0]
 
         # read chuck
-        files = os.listdir("../mesh/results/" + c + '/')
+        files = os.listdir("/home/shuxian/projects/mesh/results/" + c + '/')
         for file in files:
+            print(file)
             if file.split('.')[-1] == 'obj':
-                mesh = open3d.io.read_triangle_mesh("../mesh/results/" + c + '/' + file)
+                print("/home/shuxian/projects/mesh/results/" + c + '/' + file)
+                mesh = open3d.io.read_triangle_mesh("/home/shuxian/projects/mesh/results/" + c + '/' + file)
             else:
                 continue
         pc = open3d.geometry.PointCloud()
