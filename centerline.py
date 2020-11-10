@@ -11,6 +11,7 @@ from skimage import morphology
 from scipy import ndimage, interpolate, spatial
 
 def ComputeCovariance(demo, idx):
+    '''compute eigen value&direction of a point cloud DEMO's subset IDX'''
     points = np.asarray(demo.points)
     neighbors = points[idx]
     covariance = np.zeros((3, 3))
@@ -39,7 +40,14 @@ def ComputeCovariance(demo, idx):
     return w, v
 
 
-def GetDir(demo, r, principle=False):
+def GetDir(demo, r, principal=False):
+    '''
+    get candidate centerline direction of a point cloud
+    :param demo: point cloud
+    :param r: estimated cylinder radius, for rejecting outliers
+    :param principal: True if debugging for normals
+    :return: eigen values for debugging
+    '''
     pcd_tree = open3d.geometry.KDTreeFlann(demo)
     has_norm = demo.has_normals()
     eigenvalues = []
@@ -54,9 +62,8 @@ def GetDir(demo, r, principle=False):
 
         if k >= 3:
             w, v = ComputeCovariance(demo, idx)
-            if principle:
+            if principal:
                 if w[2] < r ** 2 / 4 or w[1] < w[2] * 2 / 3:
-                    # if False:
                     normal = [0., 0., 0.]
                 else:
                     eigenvalues.append(w)
@@ -73,13 +80,13 @@ def GetDir(demo, r, principle=False):
                 demo.normals.append(normal)
 
         else:
-            print(i)
+            print(i, 'point no direction predicted')
             if has_norm:
                 demo.normals[i] = [0., 0., 0.]
             else:
                 demo.normals.append([0., 0., 0.])
 
-    if not principle:
+    if not principal:
         demo.orient_normals_to_align_with_direction([1, 0, 0])
     # demo.orient_normals_to_align_with_direction([0, 0, 1])
     open3d.visualization.draw_geometries([demo], point_show_normal=True)
@@ -88,6 +95,7 @@ def GetDir(demo, r, principle=False):
     return eigenvalues
 
 def FindDir(demo):
+    '''get centerline direction from candidate directions'''
     norms = open3d.geometry.PointCloud()
     for n in demo.normals:
         if np.linalg.norm(n) != 0.0:
@@ -102,8 +110,9 @@ def FindDir(demo):
     # print(ave)
     ratio = 2
     for i in range(5):
+        # compute z score and update the average
         z = np.abs(stats.zscore(initials[goods, :], axis=0))
-        goods[index] = (z < 2).all(axis=1)
+        goods[index] = (z < ratio).all(axis=1)
         index  = np.where(goods)
         norms.paint_uniform_color([0.5, 0.5, 0.5])
         np.asarray(norms.colors)[goods, :] = [1, 0, 0]
@@ -115,6 +124,14 @@ def FindDir(demo):
     return ave
 
 def np_img(x, y, cs_scale, scale=255):
+    '''
+    convert point scatter to image
+    :param x: x value of point scatter
+    :param y: y value of point scatter
+    :param cs_scale: grid scale
+    :param scale: image value scale
+    :return: image, grid coordinates that each point drops in [n, 2], dictionary of points' index in each grid
+    '''
     ymax, ymin = y.max(), y.min()
     ysize = int((ymax - ymin) // cs_scale + 1)
     y = (y - ymin) // cs_scale
@@ -129,6 +146,8 @@ def np_img(x, y, cs_scale, scale=255):
     return img, np.concatenate((x.reshape(-1, 1), y.reshape(-1, 1)), axis=1), point_mapping
 
 def hole_sample_points(labeled, num=10):
+    '''sample #num points from foreground of labeled image,
+    return sample points coordinates [n, 2]'''
     xys = np.nonzero(labeled)
     total = len(xys[0])
     indexs = np.random.choice(np.arange(total), num)
@@ -137,6 +156,14 @@ def hole_sample_points(labeled, num=10):
     return np.concatenate((xs.reshape(-1, 1), ys.reshape(-1, 1)), axis=1)
 
 def get_hole_r(xys, rs, hole_coors, inter_n=50):
+    '''
+    get r for virtual points
+    :param xys: image coordinates of existing points [n, 2]
+    :param rs: r of existing points [n, 1]
+    :param hole_coors: image coordinates of virtual points [m, 2]
+    :param inter_n: #num of neighbors to compute r
+    :return: r for virtual points [m]
+    '''
     assert xys.shape[0] == rs.shape[0]
     tree = spatial.KDTree(list(zip(xys[:, 0], xys[:, 1])))
     neighbors = tree.query(hole_coors, k=inter_n)
@@ -149,6 +176,17 @@ def get_hole_r(xys, rs, hole_coors, inter_n=50):
     return hole_r
 
 def xy_2_xyz(xys, rs, mean_r, center_d, theta_d, xmin_point, cs_scale):
+    '''
+    convert virtual point xy to xyz in chunk coordinate
+    :param xys: virtual points' xy [n, 2]
+    :param rs: virtual points' r [n]
+    :param mean_r: average radius of chunk point cloud
+    :param center_d: centerline direction
+    :param theta_d: theta_0 direction
+    :param xmin_point: 3D coordinate of the left-most point
+    :param cs_scale: cs_scale in np_img()
+    :return: 3D coordinates of virtual points [n, 3]
+    '''
     l_p = xmin_point + xys[:, 0].reshape(-1, 1) * cs_scale * center_d
     thetas = (xys[:, 1] * cs_scale) / mean_r
     y_d = rs.reshape(-1, 1) * np.cos(thetas).reshape(-1, 1) * theta_d
@@ -159,23 +197,25 @@ def xy_2_xyz(xys, rs, mean_r, center_d, theta_d, xmin_point, cs_scale):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--chuck_dir", type=str, default='../mesh/')
+    parser.add_argument("--chuck_ls", type=str, default=['020', '027', '031', '035', '055', '064', '067'])
     parser.add_argument("--save_dir", type=str, default='dump/20/')
-    parser.add_argument("--center", choices=['extremal', 'centroid'])
+    parser.add_argument("--center", choices=['extremal', 'centroid'], required=True)
     parser.add_argument("--oversample", action="store_true")
     parser.add_argument("--closing", action="store_true")
     parser.add_argument("--opening", action="store_true")
     parser.add_argument("--disc_size", type=int, default=6)
+    parser.add_argument("--ending", type=int, default=0.2)
     args = parser.parse_args()
     print(args)
     # chunks = ['020', '027', '031', '032', '035', '039', '055', '056', '057', '063', '064', '067']
-    chunks = ['020', '027', '031', '035', '055', '064', '067']
+    # chunks = ['020', '027', '031', '035', '055', '064', '067']
     # chunks = ['063', '064', '067']
     #  chunks = ['063']
     # chunks = ['032', '039', '056', '057', '063']
     # redo 032 056 057 063, 039
 
-    for c in chunks[:]:
-        print(c)
+    for c in args.chuck_ls:
+        print(c, 'chunk')
         save_root = args.save_dir + os.path.splitext(c)[0]
 
         # read chuck
@@ -183,6 +223,7 @@ if __name__ == "__main__":
         for file in files:
             if file.split('.')[-1] == 'obj':
                 mesh = open3d.io.read_triangle_mesh("../mesh/results/" + c + '/' + file)
+                break
             else:
                 continue
         pc = open3d.geometry.PointCloud()
@@ -219,7 +260,7 @@ if __name__ == "__main__":
             lines=open3d.utility.Vector2iVector(lines),
         )
         open3d.visualization.draw_geometries([pc, line_set])
-        print(time.time()-start)
+        print(time.time()-start, 'sec to get centerline')
 
         # unfold
         direction = ave / np.linalg.norm(ave)
@@ -250,7 +291,8 @@ if __name__ == "__main__":
             colors = np.concatenate((colors, colors[oversample]), axis=0)
         theta *= mean_r
 
-        '''img, positions, mapping = np_img(projected_l, theta, 0.01, scale=1)
+        '''
+        img, positions, mapping = np_img(projected_l, theta, 0.01, scale=1)
         shapes = img.shape
         end_length = int(shapes[0] * 0.075)
         getridof = np.where(positions[:, 0] > (shapes[0] - end_length*2.1))[0]
@@ -266,8 +308,9 @@ if __name__ == "__main__":
         plt.ylabel('rθ', fontsize=20)
         plt.title('Flattened surface', fontsize=25)
         plt.savefig('test.png', transparent=True)
-        plt.show()'''
-        print(mean_r)
+        plt.show()
+        '''
+        print('average radius', mean_r)
 
         # morphology
         img, positions, mapping = np_img(projected_l, theta, 0.01, scale=1)
@@ -282,19 +325,20 @@ if __name__ == "__main__":
 
         # pick center 85% area, avoid end
         shapes = img.shape
-        end_length = int(shapes[0] * 0.1)
+        end_length = int(shapes[0] * args.ending)
         # new_img = np.zeros((shapes[0]*3, shapes[1]))
         # new_img[shapes[0]:shapes[0]*2, :] = img
         new_img = img[end_length:-end_length, :]
         new_shapes = new_img.shape
         surface = np.count_nonzero(new_img)
 
+        # connected component analysis to find holes
         new_img = new_img.astype(float)
         labeled, nr_objects = ndimage.label(new_img < 1.0)
         save_img = np.repeat(np.expand_dims(new_img, 2), 3, axis=2)
 
-        hole_point_num = [] # how many hole point in each hole
-        hole_samples = []
+        hole_point_num = [] # how many virtual points sampled in each hole
+        hole_samples = [] # sampled virtual points' image coordinates
 
         areas = ''
         areas_stat = 0
@@ -314,14 +358,14 @@ if __name__ == "__main__":
         hole_rate = areas_stat / (areas_stat + surface)
         # assert areas_stat + surface == new_shapes[0] * new_shapes[1]
         print('Hole ratio %.4f' % hole_rate)
-        print(time.time() - start)
+        print(time.time() - start, 'sec for hole detection pipeline')
 
         # create hole points
         # hole_samples = hole_sample_points(labeled, num=areas_stat//10)
         hole_samples = np.concatenate(hole_samples, axis=0)
         hole_samples[:, 0] += end_length
         # hole_samples[:, 0] -= shapes[0]
-        overlayed_pixel = []
+        overlayed_pixel = [] # expand theta to avoid inconsistancy around theta=0/2pi, TODO: simplify!
         for location, p_ls in mapping.items():
             overlayed_pixel.append(p_ls[0])
         consistant_sf = np.concatenate((positions[overlayed_pixel], positions[overlayed_pixel], positions[overlayed_pixel]), axis=0)
@@ -332,6 +376,7 @@ if __name__ == "__main__":
         left_p = min(projected_l) * direction + center
         hole_sample_xyz = xy_2_xyz(hole_samples, hole_r, mean_r, direction, ori_dire, left_p, 0.01)
 
+        # show and save virtual points in 3D
         hole_point = open3d.geometry.PointCloud()
         hole_point.points = open3d.utility.Vector3dVector(hole_sample_xyz)
         all_colors = []
