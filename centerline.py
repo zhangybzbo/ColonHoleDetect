@@ -204,7 +204,7 @@ if __name__ == "__main__":
     parser.add_argument("--closing", action="store_true")
     parser.add_argument("--opening", action="store_true")
     parser.add_argument("--disc_size", type=int, default=6)
-    parser.add_argument("--ending", type=int, default=0.2)
+    parser.add_argument("--ending", type=float, default=0.2)
     args = parser.parse_args()
     print(args)
     # chunks = ['020', '027', '031', '032', '035', '039', '055', '056', '057', '063', '064', '067']
