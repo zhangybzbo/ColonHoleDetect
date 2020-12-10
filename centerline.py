@@ -158,7 +158,7 @@ def xy_2_xyz(xys, rs, mean_r, center_d, theta_d, xmin_point, cs_scale):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--chuck_dir", type=str, default='/home/shuxian/projects/mesh/')
+    parser.add_argument("--chunk_dir", type=str, default='mesh/results/')
     parser.add_argument("--save_dir", type=str, default='dump/')
     parser.add_argument("--center", choices=['extremal', 'centroid'])
     parser.add_argument("--oversample", action="store_true")
@@ -169,13 +169,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     print(args)
     if args.chunk == '':
-        # chunks = ['020', '027', '031', '032', '035', '039', '055', '056', '057', '063', '064', '067']
-        # chunks = ['063', '064', '067']
-        chunks = ['Auto_A_Sep20_15-29-42_003']
-        # chunks = ['032', '039', '057', '063']
+        print('No chunk selected, using default 000.')
+        chunks = ['000']
     else:
         chunks = [args.chunk]
-    # redo 032 057 063, 039
     if not os.path.exists(args.save_dir):
         os.makedirs(args.save_dir)
 
@@ -184,12 +181,11 @@ if __name__ == "__main__":
         save_root = args.save_dir + os.path.splitext(c)[0]
 
         # read chuck
-        files = os.listdir("/home/shuxian/projects/mesh/results/" + c + '/')
+        files = os.listdir(os.path.join(args.chunk_dir,c))
         for file in files:
             print(file)
             if file.split('.')[-1] == 'obj':
-                print("/home/shuxian/projects/mesh/results/" + c + '/' + file)
-                mesh = open3d.io.read_triangle_mesh("/home/shuxian/projects/mesh/results/" + c + '/' + file)
+                mesh = open3d.io.read_triangle_mesh(os.path.join(args.chunk_dir, c, file))
             else:
                 continue
         pc = open3d.geometry.PointCloud()
