@@ -5,7 +5,7 @@ Also includes the program to sample virtual points from the holes. The coordinat
 
 To run the program:
 ```
-python centerline.py --chuck_dir='dir_to_mesh/' --chuck_ls=['name_of_chunks'] --center=extremal --closing --opening
+python centerline.py --chuck_dir='dir_to_mesh/' --center=extremal --closing --opening --chuck_ls 'chunk1' 'chunk2' 'chunk3'
 ```
 
 The parameters:
