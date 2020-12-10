@@ -5,12 +5,12 @@ Also includes the program to sample virtual points from the holes. The coordinat
 
 To run the program:
 ```
-python centerline.py --chuck_dir='dir_to_mesh/' --center=extremal --closing --opening --chuck_ls 'chunk1' 'chunk2' 'chunk3'
+python centerline.py --chunk_dir='dir_to_mesh/' --center=extremal --closing --opening --chunk_ls 'chunk1' 'chunk2' 'chunk3'
 ```
 
 The parameters:
-* `--chuck_dir` the path to where all the meshes locate, each mesh should be in a seperate folder 
-* `--chuck_ls` the folder name list of all meshes
+* `--chunk_dir` the path to where all the meshes locate, each mesh should be in a seperate folder 
+* `--chunk_ls` the folder name list of all meshes
 * `--save_dir` the path to the saving folder
 * `--center` the method to anchor centerline, `centroid` if at mesh centroid, `extremal` if at the average of min and max extremal coordinates
 * `--oversample` whether to oversample theta or not when generating 2D image
