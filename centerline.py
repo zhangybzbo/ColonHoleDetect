@@ -40,12 +40,12 @@ def ComputeCovariance(demo, idx):
     return w, v
 
 
-def GetDir(demo, r, principal=False):
+def GetDirs(demo, r, principal=False):
     '''
     get candidate centerline direction of a point cloud
-    :param demo: point cloud
+    :param demo: point cloud, principal will be stored in demo.normals
     :param r: estimated cylinder radius, for rejecting outliers
-    :param principal: True if debugging for normals
+    :param principal: False if debugging for normals
     :return: eigen values for debugging
     '''
     pcd_tree = open3d.geometry.KDTreeFlann(demo)
@@ -94,7 +94,7 @@ def GetDir(demo, r, principal=False):
 
     return eigenvalues
 
-def FindDir(demo):
+def FindCenterline(demo):
     '''get centerline direction from candidate directions'''
     norms = open3d.geometry.PointCloud()
     for n in demo.normals:
@@ -237,10 +237,10 @@ if __name__ == "__main__":
         # open3d.visualization.draw_geometries([downpcd], point_show_normal=False)
 
         # get principle directions
-        eigen = GetDir(downpcd, 0.6, True)
+        eigen = GetDirs(downpcd, 0.6, True)
 
         # get centerline direction
-        ave = FindDir(downpcd)
+        ave = FindCenterline(downpcd)
 
         # print centerline
         points = np.asarray(downpcd.points)
@@ -288,15 +288,8 @@ if __name__ == "__main__":
             colors = np.concatenate((colors, colors[oversample]), axis=0)
         theta *= mean_r
 
+        # uncomment if want to generate 2d image with colon texture
         '''
-        img, positions, mapping = np_img(projected_l, theta, 0.01, scale=1)
-        shapes = img.shape
-        end_length = int(shapes[0] * 0.075)
-        getridof = np.where(positions[:, 0] > (shapes[0] - end_length*2.1))[0]
-        projected_l = np.delete(projected_l, getridof)
-        theta = np.delete(theta, getridof)
-        colors = np.delete(colors, getridof, axis=0)
-
         import matplotlib
         matplotlib.rcParams['xtick.labelsize'] = 20
         matplotlib.rcParams['ytick.labelsize'] = 20
@@ -320,7 +313,7 @@ if __name__ == "__main__":
             img = morphology.binary_opening(img, morphology.diamond(args.disc_size)).astype(np.uint8)
             save_mor += '_open'
 
-        # pick center 85% area, avoid end
+        # pick center area to calculate interior holes, avoid end
         shapes = img.shape
         end_length = int(shapes[0] * args.ending)
         # new_img = np.zeros((shapes[0]*3, shapes[1]))
@@ -357,7 +350,7 @@ if __name__ == "__main__":
         print('Hole ratio %.4f' % hole_rate)
         print(time.time() - start, 'sec for hole detection pipeline')
 
-        # create hole points
+        # create virtual points in holes
         # hole_samples = hole_sample_points(labeled, num=areas_stat//10)
         hole_samples = np.concatenate(hole_samples, axis=0)
         hole_samples[:, 0] += end_length
