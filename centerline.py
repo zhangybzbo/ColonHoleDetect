@@ -43,12 +43,12 @@ def ComputeCovariance(demo, idx):
     return w, v
 
 
-def GetDir(demo, r, principal=False):
+def GetDirs(demo, r, principal=False):
     '''
     get candidate centerline direction of a point cloud
-    :param demo: point cloud
+    :param demo: point cloud, principal will be stored in demo.normals
     :param r: estimated cylinder radius, for rejecting outliers
-    :param principal: True if debugging for normals
+    :param principal: False if debugging for normals
     :return: eigen values for debugging
     '''
     pcd_tree = open3d.geometry.KDTreeFlann(demo)
@@ -97,7 +97,7 @@ def GetDir(demo, r, principal=False):
 
     return eigenvalues
 
-def FindDir(demo):
+def FindCenterline(demo):
     '''get centerline direction from candidate directions'''
     norms = open3d.geometry.PointCloud()
     for n in demo.normals:
