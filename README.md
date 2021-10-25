@@ -1,7 +1,7 @@
 # Hole finding pipeline
-The pipeline program to detect holes on chunk surfaces. Giving a list of chunks, the program will give the relative areas of surface and every missing region, and the missing ratio of each chunk.
+The pipeline program detects holes on surfaces of endoscopy video chunks. Given a list of chunks, the program will give the relative areas of surface and every missing region, and the missing ratio of each chunk.
 
-Also includes the program to sample virtual points from the holes. The coordinates of virtual points in different missing regions will be saved separately in the generated `.pkl` file.
+The code base also includes the program to sample virtual points from the holes. The coordinates of virtual points in different missing regions will be saved separately in the generated `.pkl` file.
 
 To run the program:
 ```
